@@ -225,7 +225,7 @@ public class UIBotTestUtils {
      * @param action        The action to run
      * @param usePlayButton The indicator that specifies if play button should be used to run the action or not.
      */
-    public static void runLibertyActionFromLTWDropDownMenu(RemoteRobot remoteRobot, String action, boolean usePlayButton) {
+    public static void runLibertyActionFromLTWDropDownMenu(RemoteRobot remoteRobot, String action, boolean usePlayButton, int maxRetries) {
         ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(10));
 
         // Click on the Liberty toolbar to give it focus.
@@ -233,7 +233,6 @@ public class UIBotTestUtils {
         libertyTWBar.click();
 
         // Process the action.
-        int maxRetries = 3;
         Exception error = null;
         for (int i = 0; i < maxRetries; i++) {
             try {
@@ -256,6 +255,13 @@ public class UIBotTestUtils {
                         }
                         break;
                     }
+                }
+
+                // If the Start... action was selected, make sure the Edit Configuration dialog is displayed.
+                if (action.equals("Start...")) {
+                    // Finding the dialog may take a quite some time on Windows.
+                    // This call will fail if the expected dialog is not displayed.
+                    projectFrame.find(DialogFixture.class, DialogFixture.byTitle("Edit Configuration"), Duration.ofSeconds(30));
                 }
 
                 break;
@@ -284,12 +290,37 @@ public class UIBotTestUtils {
      * @param projectName The name of the project.
      * @param action      The action to run.
      */
-    public static void runActionLTWPopupMenu(RemoteRobot remoteRobot, String projectName, String action) {
-        RemoteText project = findProjectInLibertyToolWindow(remoteRobot, projectName, "60");
-        project.rightClick();
-        ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(10));
-        ComponentFixture menuAction = projectFrame.getActionMenuItem(action);
-        menuAction.click();
+    public static void runActionLTWPopupMenu(RemoteRobot remoteRobot, String projectName, String action, int maxRetries) {
+        Exception error = null;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                error = null;
+                RemoteText project = findProjectInLibertyToolWindow(remoteRobot, projectName, "60");
+                project.rightClick();
+                ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(10));
+                ComponentFixture menuAction = projectFrame.getActionMenuItem(action);
+                menuAction.click();
+
+                // If the Liberty: Start... action was selected, make sure the Edit Configuration dialog is displayed.
+                if (action.equals("Liberty: Start...")) {
+                    // Finding the dialog may take a quite some time on Windows.
+                    // This call will fail if the expected dialog is not displayed.
+                    projectFrame.find(DialogFixture.class, DialogFixture.byTitle("Edit Configuration"), Duration.ofSeconds(30));
+                }
+
+                break;
+            } catch (Exception e) {
+                error = e;
+                TestUtils.printTrace(TestUtils.TraceSevLevel.INFO,
+                        "Failed to run the " + action + " action using the Liberty tool window pop-up menu option (" + e.getMessage() + "). Retrying...");
+                TestUtils.sleepAndIgnoreException(5);
+            }
+        }
+
+        // Report the last error if there is one.
+        if (error != null) {
+            throw new RuntimeException("Failed to run the " + action + " action using theLiberty tool window pop-up menu option", error);
+        }
     }
 
     /**
@@ -569,6 +600,52 @@ public class UIBotTestUtils {
         }
     }
 
+    /**
+     * Opens the specified file located in directory <project>/src/main/liberty/config.
+     *
+     * @param remoteRobot The RemoteRobot instance.
+     * @param projectName The name of the project that contains the file to open.
+     * @param fileName    The name of the file to open.
+     */
+    public static void openFile(RemoteRobot remoteRobot, String projectName, String fileName, String... filePath) {
+        int maxRetries = 15;
+        Exception error = null;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                error = null;
+                TestUtils.printTrace(TestUtils.TraceSevLevel.INFO, "openFile: iteration = " + i);
+
+                // find the Project Frame
+                ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofMinutes(2));
+
+                // hide the terminal window for now
+                hideTerminalWindow(remoteRobot);
+
+                // get a JTreeFixture reference to the file project viewer entry
+                JTreeFixture projTree = projectFrame.getProjectViewJTree(projectName);
+
+                // expand project directories that are specific to this test app being used by these testcases
+                // must be expanded here before trying to open specific
+
+                projTree.expand(filePath);
+
+                projTree.findText(fileName).doubleClick();
+                TestUtils.printTrace(TestUtils.TraceSevLevel.INFO, "openFile: double clicked on file name");
+                break;
+
+            } catch (Exception e) {
+                error = e;
+                TestUtils.printTrace(TestUtils.TraceSevLevel.INFO, "Unable to open file " + fileName + " (" + e.getMessage() + "). Retrying...");
+                TestUtils.sleepAndIgnoreException(2);
+            }
+        }
+
+        // Report the last error if there is one.
+        if (error != null) {
+            throw new RuntimeException("Unable to open file " + fileName, error);
+        }
+    }
+    
     public static void hideTerminalWindow(RemoteRobot remoteRobot) {
         try {
             ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(2));
@@ -736,7 +813,7 @@ public class UIBotTestUtils {
                 break;
             } catch (WaitForConditionTimeoutException wftoe) {
                 error = wftoe;
-                TestUtils.sleepAndIgnoreException(2);
+                TestUtils.sleepAndIgnoreException(20);
                 // click on center of editor pane - allow hover to work on next attempt
                 editorNew.click();
             }
@@ -771,6 +848,7 @@ public class UIBotTestUtils {
             try {
                 // move the cursor to the origin of the editor
                 goToLineAndColumn(remoteRobot, keyboard, 1, 1);
+
                 editorNew.click(originPt);
 
                 // Find the target text on the editor and move the move to it.
@@ -838,6 +916,11 @@ public class UIBotTestUtils {
         EditorFixture editorNew = remoteRobot.find(EditorFixture.class, EditorFixture.Companion.getLocator());
         editorNew.click();
 
+        Exception error = null;
+
+        for (int i = 0; i < 10; i++) {
+            error = null;
+            try {
         Keyboard keyboard = new Keyboard(remoteRobot);
         // find the location in the file to begin the stanza insertion
         // since we know this is a new empty file, go to position 1,1
@@ -864,6 +947,20 @@ public class UIBotTestUtils {
             // linux + windows
             keyboard.hotKey(VK_CONTROL, VK_S);
         }
+        break;
+            } catch (WaitForConditionTimeoutException wftoe) {
+                error = wftoe;
+
+                // The source content may have been corrupted in the process. Replace it before re-trying it.
+                UIBotTestUtils.clearWindowContent(remoteRobot);
+                TestUtils.sleepAndIgnoreException(2);
+            }
+        }
+
+        // Report the last error if there is one.
+        if (error != null) {
+            throw new RuntimeException("Unable to insert entry in config file : " + fileName + " using text: " + snippetSubString, error);
+        }
     }
 
     /**
@@ -881,54 +978,73 @@ public class UIBotTestUtils {
         ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(30));
         clickOnFileTab(remoteRobot, fileName);
         EditorFixture editorNew = remoteRobot.find(EditorFixture.class, EditorFixture.Companion.getLocator());
+        Exception error = null;
+
         editorNew.click();
 
-        Keyboard keyboard = new Keyboard(remoteRobot);
-        // find the location in the file to begin the stanza insertion
-        // we will put new config at the end of the config file
-        // (after the last line already in the file)
-        keyboard.hotKey(VK_CONTROL, VK_END);
-        keyboard.enter();
+        for (int i = 0; i < 10; i++) {
+            error = null;
+            try {
+                Keyboard keyboard = new Keyboard(remoteRobot);
+                // find the location in the file to begin the stanza insertion
+                // we will put new config at the end of the config file
+                // (after the last line already in the file)
+                keyboard.hotKey(VK_CONTROL, VK_END);
+                keyboard.enter();
 
-        keyboard.enterText(configNameSnippet);
+                keyboard.enterText(configNameSnippet);
 
-        // Narrow down the config name completion suggestions in the pop-up window that is automatically
-        // opened as text is typed based on the value of configNameSnippet. Avoid hitting ctrl + space as it has the side effect of selecting
-        // and entry automatically if the completion suggestion windows has one entry only.
-        ComponentFixture namePopupWindow = projectFrame.getLookupList();
-        RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
-                Duration.ofSeconds(1),
-                "Waiting for text " + configNameSnippet + " to appear in the completion suggestion pop-up window",
-                "Text " + configNameSnippet + " did not appear in the completion suggestion pop-up window",
-                () -> namePopupWindow.hasText(configNameSnippet));
+                // Narrow down the config name completion suggestions in the pop-up window that is automatically
+                // opened as text is typed based on the value of configNameSnippet. Avoid hitting ctrl + space as it has the side effect of selecting
+                // and entry automatically if the completion suggestion windows has one entry only.
+                ComponentFixture namePopupWindow = projectFrame.getLookupList();
+                RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
+                        Duration.ofSeconds(1),
+                        "Waiting for text " + configNameSnippet + " to appear in the completion suggestion pop-up window",
+                        "Text " + configNameSnippet + " did not appear in the completion suggestion pop-up window",
+                        () -> namePopupWindow.hasText(configNameSnippet));
 
-        // now choose the specific item based on the chooser string
-        namePopupWindow.findText(contains(configNameChooserSnippet)).doubleClick();
+                // now choose the specific item based on the chooser string
+                namePopupWindow.findText(contains(configNameChooserSnippet)).doubleClick();
 
-        editorNew.findText("false").doubleClick();
-        keyboard.hotKey(VK_DELETE);
+                editorNew.findText("false").doubleClick();
+                keyboard.hotKey(VK_DELETE);
 
-        keyboard.enterText(configValueSnippet);
+                keyboard.enterText(configValueSnippet);
 
-        if (completeWithPopup) {
-            // Select the appropriate value completion suggestion in the pop-up window that is automatically
-            // opened as text is typed. Avoid hitting ctrl + space as it has the side effect of selecting
-            // and entry automatically if the completion suggestion windows has one entry only.
-            ComponentFixture valuePopupWindow = projectFrame.getLookupList();
-            RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
-                    Duration.ofSeconds(1),
-                    "Waiting for text " + configValueSnippet + " to appear in the completion suggestion pop-up window",
-                    "Text " + configValueSnippet + " did not appear in the completion suggestion pop-up window",
-                    () -> valuePopupWindow.hasText(configValueSnippet));
+                if (completeWithPopup) {
+                    // Select the appropriate value completion suggestion in the pop-up window that is automatically
+                    // opened as text is typed. Avoid hitting ctrl + space as it has the side effect of selecting
+                    // and entry automatically if the completion suggestion windows has one entry only.
+                    ComponentFixture valuePopupWindow = projectFrame.getLookupList();
+                    RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
+                            Duration.ofSeconds(1),
+                            "Waiting for text " + configValueSnippet + " to appear in the completion suggestion pop-up window",
+                            "Text " + configValueSnippet + " did not appear in the completion suggestion pop-up window",
+                            () -> valuePopupWindow.hasText(configValueSnippet));
 
-            valuePopupWindow.findText(contains(configValueSnippet)).doubleClick();
+                    valuePopupWindow.findText(contains(configValueSnippet)).doubleClick();
+                }
+                // let the auto-save function of intellij save the file before testing it
+                if (remoteRobot.isMac()) {
+                    keyboard.hotKey(VK_META, VK_S);
+                } else {
+                    // linux + windows
+                    keyboard.hotKey(VK_CONTROL, VK_S);
+                }
+                break;
+            } catch (WaitForConditionTimeoutException wftoe) {
+                error = wftoe;
+
+                // The server.xml content may have been corrupted in the process. Replace it before re-trying it.
+                UIBotTestUtils.pasteOnActiveWindow(remoteRobot);
+                TestUtils.sleepAndIgnoreException(2);
+            }
         }
-        // let the auto-save function of intellij save the file before testing it
-        if (remoteRobot.isMac()) {
-            keyboard.hotKey(VK_META, VK_S);
-        } else {
-            // linux + windows
-            keyboard.hotKey(VK_CONTROL, VK_S);
+
+        // Report the last error if there is one.
+        if (error != null) {
+            throw new RuntimeException("Unable to insert entry in config file : " + fileName + " using text: " + configNameSnippet, error);
         }
     }
 
@@ -947,55 +1063,73 @@ public class UIBotTestUtils {
         ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(30));
         clickOnFileTab(remoteRobot, fileName);
         EditorFixture editorNew = remoteRobot.find(EditorFixture.class, EditorFixture.Companion.getLocator());
-        editorNew.click();
+        Exception error = null;
 
-        Keyboard keyboard = new Keyboard(remoteRobot);
-        // find the location in the file to begin the stanza insertion
-        // we will put new config at the end of the config file
-        // (after the last line already in the file)
-        keyboard.hotKey(VK_CONTROL, VK_END);
-        keyboard.enter();
+        for (int i = 0; i < 10; i++) {
+            error = null;
+            try {
+                editorNew.click();
+                Keyboard keyboard = new Keyboard(remoteRobot);
+                // find the location in the file to begin the stanza insertion
+                // we will put new config at the end of the config file
+                // (after the last line already in the file)
+                keyboard.hotKey(VK_CONTROL, VK_END);
+                keyboard.enter();
 
-        keyboard.enterText(configNameSnippet);
+                keyboard.enterText(configNameSnippet);
 
-        // Narrow down the config name completion suggestions in the pop-up window that is automatically
-        // opened as text is typed based on the value of configNameSnippet. Avoid hitting ctrl + space as it has the side effect of selecting
-        // and entry automatically if the completion suggestion windows has one entry only.
-        ComponentFixture namePopupWindow = projectFrame.getLookupList();
-        RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
-                Duration.ofSeconds(1),
-                "Waiting for text " + configNameSnippet + " to appear in the completion suggestion pop-up window",
-                "Text " + configNameSnippet + " did not appear in the completion suggestion pop-up window",
-                () -> namePopupWindow.hasText(configNameSnippet));
+                // Narrow down the config name completion suggestions in the pop-up window that is automatically
+                // opened as text is typed based on the value of configNameSnippet. Avoid hitting ctrl + space as it has the side effect of selecting
+                // and entry automatically if the completion suggestion windows has one entry only.
+                ComponentFixture namePopupWindow = projectFrame.getLookupList();
+                RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
+                        Duration.ofSeconds(1),
+                        "Waiting for text " + configNameSnippet + " to appear in the completion suggestion pop-up window",
+                        "Text " + configNameSnippet + " did not appear in the completion suggestion pop-up window",
+                        () -> namePopupWindow.hasText(configNameSnippet));
 
-        // now choose the specific item based on the chooser string
-        namePopupWindow.findText(contains(configNameChooserSnippet)).doubleClick();
+                // now choose the specific item based on the chooser string
+                namePopupWindow.findText(contains(configNameChooserSnippet)).doubleClick();
 
-        keyboard.hotKey(VK_END);
-        keyboard.enterText("=");
-        keyboard.hotKey(VK_END);
+                keyboard.hotKey(VK_END);
+                keyboard.enterText("=");
+                keyboard.hotKey(VK_END);
 
-        keyboard.enterText(configValueSnippet);
+                keyboard.enterText(configValueSnippet);
 
-        if (completeWithPopup) {
-            // Select the appropriate value completion suggestion in the pop-up window that is automatically
-            // opened as text is typed. Avoid hitting ctrl + space as it has the side effect of selecting
-            // and entry automatically if the completion suggestion windows has one entry only.
-            ComponentFixture valuePopupWindow = projectFrame.getLookupList();
-            RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
-                    Duration.ofSeconds(1),
-                    "Waiting for text " + configValueSnippet + " to appear in the completion suggestion pop-up window",
-                    "Text " + configValueSnippet + " did not appear in the completion suggestion pop-up window",
-                    () -> valuePopupWindow.hasText(configValueSnippet));
+                if (completeWithPopup) {
+                    // Select the appropriate value completion suggestion in the pop-up window that is automatically
+                    // opened as text is typed. Avoid hitting ctrl + space as it has the side effect of selecting
+                    // and entry automatically if the completion suggestion windows has one entry only.
+                    ComponentFixture valuePopupWindow = projectFrame.getLookupList();
+                    RepeatUtilsKt.waitFor(Duration.ofSeconds(5),
+                            Duration.ofSeconds(1),
+                            "Waiting for text " + configValueSnippet + " to appear in the completion suggestion pop-up window",
+                            "Text " + configValueSnippet + " did not appear in the completion suggestion pop-up window",
+                            () -> valuePopupWindow.hasText(configValueSnippet));
 
-            valuePopupWindow.findText(contains(configValueSnippet)).doubleClick();
+                    valuePopupWindow.findText(contains(configValueSnippet)).doubleClick();
+                }
+                // let the auto-save function of intellij save the file before testing it
+                if (remoteRobot.isMac()) {
+                    keyboard.hotKey(VK_META, VK_S);
+                } else {
+                    // linux + windows
+                    keyboard.hotKey(VK_CONTROL, VK_S);
+                }
+                break;
+            } catch (WaitForConditionTimeoutException wftoe) {
+                error = wftoe;
+
+                // The server.xml content may have been corrupted in the process. Replace it before re-trying it.
+                UIBotTestUtils.pasteOnActiveWindow(remoteRobot);
+                TestUtils.sleepAndIgnoreException(2);
+            }
         }
-        // let the auto-save function of intellij save the file before testing it
-        if (remoteRobot.isMac()) {
-            keyboard.hotKey(VK_META, VK_S);
-        } else {
-            // linux + windows
-            keyboard.hotKey(VK_CONTROL, VK_S);
+
+        // Report the last error if there is one.
+        if (error != null) {
+            throw new RuntimeException("Unable to insert entry in config file : " + fileName + " using text: " + configNameSnippet, error);
         }
     }
 
@@ -1136,6 +1270,42 @@ public class UIBotTestUtils {
     }
 
     /**
+     * Deletes a string of text from the currently focused editor
+     *
+     * @param remoteRobot      The RemoteRobot instance.
+     * @param fileName         The fileName to modify
+     * @param textToModify     The string to modify
+     * @param modificationText The string to use for modification
+     */
+    public static void selectAndModifyTextInJavaPart(RemoteRobot remoteRobot, String fileName, String textToModify, String modificationText){
+        clickOnFileTab(remoteRobot, fileName);
+        Locator locator = byXpath("//div[@class='EditorWindowTopComponent']//div[@class='EditorComponentImpl']");
+        EditorFixture editorNew = remoteRobot.find(EditorFixture.class, locator, Duration.ofSeconds(20));
+        editorNew.click();
+
+        Keyboard keyboard = new Keyboard(remoteRobot);
+
+        // find the location to click on for feature name entry
+        // this should put the entry cursor directly between <feature> and <feature/>
+        //int offset = editorText.indexOf(textToDelete);
+        editorNew.click();
+        editorNew.selectText(textToModify);
+        keyboard.hotKey(VK_DELETE);
+        keyboard.enterText(modificationText);
+
+        // save the new content
+        if (remoteRobot.isMac()) {
+            keyboard.hotKey(VK_META, VK_S);
+        } else {
+            // linux + windows
+            keyboard.hotKey(VK_CONTROL, VK_S);
+        }
+
+        // slight delay to allow the diagnotic/quick fix data to arrive?
+        TestUtils.sleepAndIgnoreException(2);
+    }
+
+    /**
      * Places the cursor at an exact location for text entry in file
      *
      * @param remoteRobot the remote robot instance
@@ -1251,10 +1421,10 @@ public class UIBotTestUtils {
     public static void clearWindowContent(RemoteRobot remoteRobot) {
         // Select the content.
         ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(30));
-        ComponentFixture editMenuEntry = projectFrame.getActionMenu("Edit");
+        ComponentFixture editMenuEntry = projectFrame.getActionMenu("Edit", "10");
         editMenuEntry.click();
-        ComponentFixture slectAllEntry = projectFrame.getActionMenuItem("Select All");
-        slectAllEntry.click();
+        ComponentFixture selectAllEntry = projectFrame.getActionMenuItem("Select All");
+        selectAllEntry.click();
 
         // Delete/Clear the content.
         editMenuEntry.click();
@@ -1391,37 +1561,74 @@ public class UIBotTestUtils {
      *
      * @param remoteRobot The RemoteRobot instance.
      */
-    public static void runActionFromSearchEverywherePanel(RemoteRobot remoteRobot, String action) {
-        // Click on Navigate on the Menu bar.
-        ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofMinutes(2));
-        ComponentFixture navigateMenuEntry = projectFrame.getActionMenu("Navigate", "10");
-        navigateMenuEntry.click();
+    public static void runActionFromSearchEverywherePanel(RemoteRobot remoteRobot, String action, int maxRetries) {
+        // Search everywhere UI actions may fail due to UI flickering/indexing on Windows. Retry in case of a failure.
+        Exception error = null;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                error = null;
 
-        // Click on Search Everywhere in the menu.
-        ComponentFixture searchFixture = projectFrame.getActionMenuItem("Search Everywhere");
-        searchFixture.click();
+                // Click on Navigate on the Menu bar.
+                ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofMinutes(2));
+                ComponentFixture navigateMenuEntry = projectFrame.getActionMenu("Navigate", "20");
+                navigateMenuEntry.click();
 
-        // Click on the Actions tab
-        ComponentFixture actionsTabFixture = projectFrame.getSETabLabel("Actions");
-        actionsTabFixture.click();
+                // Click on Search Everywhere in the menu.
+                ComponentFixture searchFixture = projectFrame.getActionMenuItem("Search Everywhere");
+                searchFixture.click();
 
-        // Type the search string in the search dialog box.
-        JTextFieldFixture searchField = projectFrame.textField(JTextFieldFixture.Companion.byType(), Duration.ofSeconds(10));
-        searchField.click();
-        searchField.setText(action);
+                // Click on the Actions tab
+                ComponentFixture actionsTabFixture = projectFrame.getSETabLabel("Actions");
+                actionsTabFixture.click();
 
-        // Wait for the desired action to show in the search output frame and click on it.
-        RepeatUtilsKt.waitFor(Duration.ofSeconds(20),
-                Duration.ofSeconds(1),
-                "Waiting for the search to filter and show " + action + " in search output",
-                "The search did not filter or show " + action + " in the search output",
-                () -> findTextInListOutputPanel(projectFrame, action) != null);
+                // Type the search string in the search dialog box.
+                JTextFieldFixture searchField = projectFrame.textField(JTextFieldFixture.Companion.byType(), Duration.ofSeconds(10));
+                searchField.click();
+                searchField.setText(action);
 
-        RemoteText foundAction = findTextInListOutputPanel(projectFrame, action);
-        if (foundAction != null) {
-            foundAction.click();
-        } else {
-            fail("Search everywhere found " + action + ", but it can no longer be found after a subsequent attempt to find it.");
+                // Wait for the desired action to show in the search output frame and click on it.
+                RepeatUtilsKt.waitFor(Duration.ofSeconds(20),
+                        Duration.ofSeconds(1),
+                        "Waiting for the search to filter and show " + action + " in search output",
+                        "The search did not filter or show " + action + " in the search output",
+                        () -> findTextInListOutputPanel(projectFrame, action) != null);
+
+                RemoteText foundAction = findTextInListOutputPanel(projectFrame, action);
+                if (foundAction != null) {
+                    foundAction.click();
+                } else {
+                    throw new RuntimeException("Search everywhere found " + action + ", but it can no longer be found after a subsequent attempt to find it.");
+                }
+
+                // If the Liberty: Start... action was selected, make sure the Edit Configuration dialog is displayed.
+                if (action.equals("Liberty: Start...")) {
+                    // This call will fail if the expected dialog is not displayed.
+                    projectFrame.find(DialogFixture.class, DialogFixture.byTitle("Edit Configuration"), Duration.ofSeconds(30));
+                }
+
+                // If the Liberty: Add project to the tool window action was selected, make sure the Add Liberty project dialog is displayed.
+                if (action.equals("Liberty: Add project to the tool window")) {
+                    // This call will fail if the expected dialog is not displayed.
+                    projectFrame.find(DialogFixture.class, DialogFixture.byTitle("Add Liberty project"), Duration.ofSeconds(30));
+                }
+
+                // If the Liberty: Add project to the tool window action was selected, make sure the Remove Liberty project dialog is displayed.
+                if (action.equals("Liberty: Remove project from the tool window")) {
+                    // This call will fail if the expected dialog is not displayed.
+                    projectFrame.find(DialogFixture.class, DialogFixture.byTitle("Remove Liberty project"), Duration.ofSeconds(30));
+                }
+                break;
+            } catch (Exception e) {
+                error = e;
+                TestUtils.printTrace(TestUtils.TraceSevLevel.INFO,
+                        "Failed to run the " + action + " action using the search everywhere option (" + e.getMessage() + "). Retrying...");
+                TestUtils.sleepAndIgnoreException(5);
+            }
+        }
+
+        // Report the last error if there is one.
+        if (error != null) {
+            throw new RuntimeException("Failed to run the " + action + " action using the search everywhere option", error);
         }
     }
 
@@ -1485,7 +1692,26 @@ public class UIBotTestUtils {
      */
     public static void waitForLTWNoProjectDetectedMsg(RemoteRobot remoteRobot, int waitTime) {
         String text = "No Liberty Maven or Liberty Gradle projects detected in this workspace.";
-        waitForLTWTextAreaMessage(remoteRobot, text, waitTime);
+
+        int maxRetries = 3;
+        Exception error = null;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                error = null;
+                waitForLTWTextAreaMessage(remoteRobot, text, waitTime);
+                break;
+            } catch (Exception e) {
+                // Indexing may cause errors. Retry.
+                error = e;
+                TestUtils.printTrace(TestUtils.TraceSevLevel.INFO, "Unable to find LTW Text area message: " + text + ". (" + e.getMessage() + "). Retrying...");
+                TestUtils.sleepAndIgnoreException(5);
+            }
+        }
+
+        // Report the last error if there is one.
+        if (error != null) {
+            throw new RuntimeException("Unable to find LTW Text area message: " + text + ".", error);
+        }
     }
 
     /**
@@ -1657,7 +1883,7 @@ public class UIBotTestUtils {
      */
     public static void editLibertyConfigUsingEditConfigDialog(RemoteRobot remoteRobot, String cfgName, String startParams) {
         // Display the Liberty Edit Configuration dialog.
-        runLibertyActionFromLTWDropDownMenu(remoteRobot, "Start...", false);
+        runLibertyActionFromLTWDropDownMenu(remoteRobot, "Start...", false, 3);
 
         // Get a hold of the Liberty Edit Configurations dialog.
         ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(10));
@@ -1732,7 +1958,7 @@ public class UIBotTestUtils {
 
         // Get a hold of the Liberty Edit Configuration dialog.
         ProjectFrameFixture projectFrame = remoteRobot.find(ProjectFrameFixture.class, Duration.ofSeconds(10));
-        DialogFixture libertyCfgDialog = projectFrame.find(DialogFixture.class, DialogFixture.byTitle("Edit Configuration"), Duration.ofSeconds(10));
+        DialogFixture libertyCfgDialog = projectFrame.find(DialogFixture.class, DialogFixture.byTitle("Edit Configuration"), Duration.ofSeconds(30));
 
         try {
             // Get the name of the configuration.
@@ -2015,34 +2241,35 @@ public class UIBotTestUtils {
      */
     public static void runStopAction(RemoteRobot remoteRobot, String testName, ActionExecType execType, String absoluteWLPPath, String smMPProjName, int maxRetries) {
         for (int i = 0; i < maxRetries; i++) {
-            try {
-                // Stop dev mode.
-                switch (execType) {
-                    case LTWPLAY:
-                        UIBotTestUtils.runLibertyActionFromLTWDropDownMenu(remoteRobot, "Stop", true);
-                        break;
-                    case LTWDROPDOWN:
-                        UIBotTestUtils.runLibertyActionFromLTWDropDownMenu(remoteRobot, "Stop", false);
-                        break;
-                    case LTWPOPUP:
-                        UIBotTestUtils.runActionLTWPopupMenu(remoteRobot, smMPProjName, "Liberty: Stop");
-                        break;
-                    case SEARCH:
-                        UIBotTestUtils.runActionFromSearchEverywherePanel(remoteRobot, "Liberty: Stop");
-                        break;
-                    default:
-                        fail("An invalid execution type of " + execType + " was requested.");
-                }
+            // Stop dev mode. Any failures during command processing are retried. If there are any
+            // failures, this method will exit.
+            switch (execType) {
+                case LTWPLAY:
+                    UIBotTestUtils.runLibertyActionFromLTWDropDownMenu(remoteRobot, "Stop", true, maxRetries);
+                    break;
+                case LTWDROPDOWN:
+                    UIBotTestUtils.runLibertyActionFromLTWDropDownMenu(remoteRobot, "Stop", false, maxRetries);
+                    break;
+                case LTWPOPUP:
+                    UIBotTestUtils.runActionLTWPopupMenu(remoteRobot, smMPProjName, "Liberty: Stop", maxRetries);
+                    break;
+                case SEARCH:
+                    UIBotTestUtils.runActionFromSearchEverywherePanel(remoteRobot, "Liberty: Stop", maxRetries);
+                    break;
+                default:
+                    fail("An invalid execution type of " + execType + " was requested.");
+            }
 
-                // Validate that the server stopped. Fail the test if the last iteration fails.
+            // Validate that the server stopped. Fail the test if the last iteration fails.
+            try {
                 boolean failOnError = (i == (maxRetries - 1));
                 TestUtils.validateLibertyServerStopped(testName, absoluteWLPPath, 12, failOnError);
-
                 break;
             } catch (Exception e) {
                 // The Liberty tool window may flicker due to sudden indexing, which may cause an error.
-                // Retry immediately. The logic in this method has inherent waits.
+                // Retry the action command and validation.
                 TestUtils.printTrace(TestUtils.TraceSevLevel.INFO, "Retrying server stop. Cause: " + e.getMessage());
+                TestUtils.sleepAndIgnoreException(5);
             }
         }
     }
